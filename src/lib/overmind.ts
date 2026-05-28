@@ -29,6 +29,8 @@ class OvermindClient {
   }
 
   private async post(path: string, body: unknown): Promise<void> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1000);
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: "POST",
@@ -37,26 +39,29 @@ class OvermindClient {
           Authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify(body),
+        signal: ctrl.signal,
       });
       if (!res.ok) {
         const text = await res.text();
         console.warn(`[Overmind] ${path} → ${res.status}: ${text}`);
       }
     } catch (err) {
-      console.warn(`[Overmind] ${path} failed (non-fatal):`, err);
+      // non-fatal: tracing is best-effort
+    } finally {
+      clearTimeout(timer);
     }
   }
 
-  async createRun(runId: string, workflowName: string, metadata?: Record<string, string>): Promise<void> {
-    await this.post("/runs", { id: runId, workflow_name: workflowName, metadata });
+  createRun(runId: string, workflowName: string, metadata?: Record<string, string>): void {
+    void this.post("/runs", { id: runId, workflow_name: workflowName, metadata });
   }
 
-  async logStep(runId: string, log: OvermindStepLog): Promise<void> {
-    await this.post(`/runs/${runId}/steps`, log);
+  logStep(runId: string, log: OvermindStepLog): void {
+    void this.post(`/runs/${runId}/steps`, log);
   }
 
-  async completeRun(runId: string, status: "completed" | "failed", summary?: unknown): Promise<void> {
-    await this.post(`/runs/${runId}/complete`, { status, summary });
+  completeRun(runId: string, status: "completed" | "failed", summary?: unknown): void {
+    void this.post(`/runs/${runId}/complete`, { status, summary });
   }
 }
 
@@ -83,11 +88,11 @@ async function traceStep<T>(
   const overmind = getClient();
   const start = Date.now();
 
-  await overmind.logStep(runId, { step_name: stepName, status: "running", input_summary: inputSummary });
+  overmind.logStep(runId, { step_name: stepName, status: "running", input_summary: inputSummary });
 
   try {
     const output = await fn();
-    await overmind.logStep(runId, {
+    overmind.logStep(runId, {
       step_name: stepName,
       status: "success",
       input_summary: inputSummary,
@@ -97,7 +102,7 @@ async function traceStep<T>(
     return output;
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    await overmind.logStep(runId, {
+    overmind.logStep(runId, {
       step_name: stepName,
       status: "error",
       input_summary: inputSummary,
@@ -163,7 +168,7 @@ export async function runPipeline(prompt: string, sessionId: string): Promise<Pi
   const pipelineStart = Date.now();
   const overmind = getClient();
 
-  await overmind.createRun(runId, "intentgraph-ad-eligibility", {
+  overmind.createRun(runId, "intentgraph-ad-eligibility", {
     prompt_id: promptId,
     session_id: sessionId,
     prompt_preview: prompt.slice(0, 80),
@@ -240,7 +245,7 @@ export async function runPipeline(prompt: string, sessionId: string): Promise<Pi
 
     const durationMs = Date.now() - pipelineStart;
 
-    await overmind.completeRun(runId, "completed", {
+    overmind.completeRun(runId, "completed", {
       verdict,
       score: scoring.total,
       duration_ms: durationMs,
@@ -279,7 +284,7 @@ export async function runPipeline(prompt: string, sessionId: string): Promise<Pi
       duration_ms: durationMs,
     };
   } catch (err) {
-    await overmind.completeRun(runId, "failed");
+    overmind.completeRun(runId, "failed");
     throw err;
   }
 }

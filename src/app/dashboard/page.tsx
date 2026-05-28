@@ -91,6 +91,7 @@ export default function Dashboard() {
   const [feed, setFeed] = useState<ScoredPrompt[]>([]);
   const [selectedItem, setSelectedItem] = useState<ScoredPrompt | null>(null);
   const [reviewQueue, setReviewQueue] = useState<ScoredPrompt[]>([]);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [stats, setStats] = useState<Stats>({
     total_today: 0, serve_count: 0, review_count: 0, block_count: 0,
     serve_rate: 0, conversion_rate: 0, avg_intent_score: 0, estimated_revenue_usd: 0,
@@ -122,14 +123,22 @@ export default function Dashboard() {
     if (running || !p.trim()) return;
     setRunning(true);
     setSelectedItem(null);
+    setPipelineError(null);
+    console.log("[runPrompt] sending prompt:", p.slice(0, 60));
     try {
       const res = await fetch("/api/score-prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: p, session_id: sessionId }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      console.log("[runPrompt] response status:", res.status);
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error("[runPrompt] error body:", errText);
+        throw new Error(errText);
+      }
       const data = await res.json();
+      console.log("[runPrompt] result:", data);
       const entry: ScoredPrompt = { ...data, prompt_text: p, ts: Date.now() };
       setSelectedItem(entry);
       setFeed((prev) => {
@@ -141,7 +150,9 @@ export default function Dashboard() {
         setReviewQueue((prev) => [entry, ...prev].slice(0, 20));
       }
     } catch (err) {
-      console.error(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[runPrompt] failed:", msg);
+      setPipelineError(msg);
     } finally {
       setRunning(false);
     }
@@ -210,6 +221,11 @@ export default function Dashboard() {
                 onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") runPrompt(prompt); }}
                 className="w-full bg-black/30 border border-white/10 rounded-lg p-3 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/60 resize-none"
               />
+              {pipelineError && (
+                <div className="text-[11px] text-red-400 bg-red-900/30 border border-red-800 rounded-lg px-3 py-2 break-all">
+                  <span className="font-semibold">Pipeline error:</span> {pipelineError}
+                </div>
+              )}
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   onClick={() => runPrompt(prompt)}
