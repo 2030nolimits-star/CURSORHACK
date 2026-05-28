@@ -1,0 +1,7 @@
+.env.local
+.env
+node_modules/
+.next/
+dist/
+mcp/dist/
+mcp/node_modules/
